@@ -89,6 +89,14 @@ The container is not listening on Railway's `PORT`, or it crashed on startup.
 4. If logs stop at `APP_SECRET` → add `APP_SECRET` on the APP service.
 5. Push the latest code (nginx listens on `PORT` + cache permissions fix), then **Redeploy**.
 
+### If you see Symfony "500 Internal Server Error"
+
+Usually assets were not compiled. Latest code runs `importmap:install` and `asset-map:compile` on startup. Push, redeploy, and check logs for:
+
+```text
+[entrypoint] Installing importmap and compiling assets for production...
+```
+
 ## 7. Public URL
 
 **APP service** → **Settings** → **Networking** → **Generate Domain**

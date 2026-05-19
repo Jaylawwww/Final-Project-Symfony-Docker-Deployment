@@ -21,6 +21,7 @@ RUN composer install --no-dev --optimize-autoloader --no-interaction --no-script
 
 COPY nginx-main.conf /etc/nginx/nginx.conf
 COPY docker/nginx-site.conf.template /etc/nginx/templates/default.conf.template
+COPY docker/php-fpm.conf /usr/local/etc/php-fpm.d/zz-docker.conf
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 RUN mkdir -p var/cache var/log /etc/nginx/templates \

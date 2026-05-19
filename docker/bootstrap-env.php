@@ -316,17 +316,28 @@ if (env('APP_DEBUG') === null) {
     exportToRuntime('APP_DEBUG', '0');
 }
 
-writeEnvFile($envPath, [
+$resolvedVars = [
     'APP_ENV' => $appEnv,
     'APP_SECRET' => $appSecret,
+    'APP_DEBUG' => env('APP_DEBUG', '0') ?? '0',
     'APP_SHARE_DIR' => env('APP_SHARE_DIR', 'var/share') ?? 'var/share',
     'DEFAULT_URI' => env('DEFAULT_URI', 'http://localhost') ?? 'http://localhost',
     'DATABASE_URL' => $databaseUrl,
     'MESSENGER_TRANSPORT_DSN' => env('MESSENGER_TRANSPORT_DSN', 'doctrine://default?auto_setup=0') ?? 'doctrine://default?auto_setup=0',
     'MAILER_DSN' => env('MAILER_DSN', 'null://null') ?? 'null://null',
-]);
+];
+
+writeEnvFile($envPath, $resolvedVars);
+
+$envLocalPhpPath = $projectDir.'/.env.local.php';
+file_put_contents(
+    $envLocalPhpPath,
+    "<?php\n\nreturn ".var_export($resolvedVars, true).";\n"
+);
+chmod($envLocalPhpPath, 0644);
 
 echo 'Database target: '.maskDatabaseUrl($databaseUrl)."\n";
+echo "Wrote .env.local.php for PHP-FPM.\n";
 
 if (($argc > 1 && $argv[1] === '--check') || (getenv('BOOTSTRAP_CHECK_DB') ?: '') === '1') {
     $params = parse_url($databaseUrl);

@@ -55,11 +55,18 @@ run_migrations() {
     fi
 }
 
+prepare_assets() {
+    log "Installing importmap and compiling assets for production..."
+    php bin/console importmap:install --no-interaction
+    php bin/console asset-map:compile --no-interaction
+    chown -R www-data:www-data public/assets assets/vendor 2>/dev/null || true
+}
+
 warm_symfony_cache() {
     log "Warming Symfony cache..."
     php bin/console cache:clear --env="${APP_ENV:-prod}" --no-warmup
     php bin/console cache:warmup --env="${APP_ENV:-prod}"
-    chown -R www-data:www-data var
+    chown -R www-data:www-data var public
 }
 
 start_php_fpm() {
@@ -92,6 +99,7 @@ case "$MODE" in
         configure_nginx
         wait_for_database
         run_migrations
+        prepare_assets
         warm_symfony_cache
         start_php_fpm
         start_nginx
