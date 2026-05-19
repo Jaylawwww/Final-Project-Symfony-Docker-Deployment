@@ -12,7 +12,9 @@ WORKDIR /var/www
 COPY . .
 COPY .env.docker .env
 
-ENV COMPOSER_ALLOW_SUPERUSER=1
+ENV COMPOSER_ALLOW_SUPERUSER=1 \
+    APP_ENV=prod \
+    APP_DEBUG=0
 
 RUN composer install --no-dev --optimize-autoloader --no-interaction --no-scripts
 
@@ -25,6 +27,7 @@ RUN mkdir -p var/cache var/log \
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
+# Railway sets PORT at runtime; entrypoint updates nginx to listen on it.
 EXPOSE 80
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

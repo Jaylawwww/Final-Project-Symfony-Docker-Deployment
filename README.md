@@ -106,6 +106,18 @@ Keeps sensitive information out of the codebase and allows flexible configuratio
 - Confirm Nginx is correctly routing requests to PHP-FPM
 - Test Docker Compose setup locally before deploying
 
+### Local (Docker Compose)
+
+```bash
+docker compose up --build
+```
+
+Open [http://localhost:8000](http://localhost:8000).
+
+### Railway
+
+Follow **[RAILWAY.md](RAILWAY.md)** for step-by-step Railway setup (MySQL + variables).
+
 ---
 
 ## Deployment Platform
