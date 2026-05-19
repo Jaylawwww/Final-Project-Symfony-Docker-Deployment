@@ -1,9 +1,9 @@
-FROM php:8.3-cli
+FROM php:8.3-fpm
 
 RUN apt-get update && apt-get install -y \
-    git unzip libpq-dev libzip-dev zip curl
-
-RUN docker-php-ext-install pdo pdo_mysql zip
+    git unzip libzip-dev zip curl nginx \
+    && docker-php-ext-install pdo pdo_mysql zip \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
@@ -11,8 +11,20 @@ WORKDIR /var/www
 
 COPY . .
 
-RUN composer install --no-dev --optimize-autoloader
+ENV COMPOSER_ALLOW_SUPERUSER=1
 
-EXPOSE 8000
+RUN composer install --no-dev --optimize-autoloader --no-interaction --no-scripts
 
-CMD php -S 0.0.0.0:$PORT -t public
+COPY nginx-main.conf /etc/nginx/nginx.conf
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+RUN mkdir -p var/cache var/log \
+    && chown -R www-data:www-data var public
+
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+EXPOSE 80
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["web"]
