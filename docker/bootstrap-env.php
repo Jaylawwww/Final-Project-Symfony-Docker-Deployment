@@ -27,6 +27,38 @@ if (!is_file($envPath)) {
     }
 }
 
+function isRailway(): bool
+{
+    foreach (['RAILWAY_ENVIRONMENT', 'RAILWAY_PROJECT_ID', 'RAILWAY_SERVICE_ID', 'RAILWAY_REPLICA_ID'] as $name) {
+        if (getRuntimeEnv($name) !== null) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function getRuntimeEnv(string $name): ?string
+{
+    $sources = [
+        $_ENV[$name] ?? null,
+        $_SERVER[$name] ?? null,
+    ];
+
+    $fromGetenv = getenv($name);
+    if ($fromGetenv !== false) {
+        $sources[] = $fromGetenv;
+    }
+
+    foreach ($sources as $value) {
+        if (is_string($value) && $value !== '') {
+            return $value;
+        }
+    }
+
+    return null;
+}
+
 /**
  * @return array<string, string>
  */
@@ -46,7 +78,11 @@ function readEnvFile(string $path): array
             continue;
         }
         [$name, $value] = explode('=', $line, 2);
-        $vars[$name] = trim($value, " \t\"'");
+        $value = trim($value);
+        if (str_starts_with($value, '"') && str_ends_with($value, '"')) {
+            $value = substr($value, 1, -1);
+        }
+        $vars[$name] = $value;
     }
 
     return $vars;
@@ -89,9 +125,14 @@ function writeEnvFile(string $path, array $vars): void
 
 function env(string $name, ?string $default = null): ?string
 {
-    $value = getenv($name);
-    if ($value !== false && $value !== '') {
-        return $value;
+    $runtime = getRuntimeEnv($name);
+    if ($runtime !== null && $runtime !== '') {
+        return $runtime;
+    }
+
+    // On Railway, only real container env vars count (not the baked .env file).
+    if (isRailway()) {
+        return $default;
     }
 
     static $fileVars = null;
@@ -100,32 +141,87 @@ function env(string $name, ?string $default = null): ?string
         $fileVars = readEnvFile($envPath);
     }
 
-    return $fileVars[$name] ?? $default;
+    $fileValue = $fileVars[$name] ?? null;
+    if ($fileValue !== null && $fileValue !== '') {
+        return $fileValue;
+    }
+
+    return $default;
+}
+
+/**
+ * @return list<string>
+ */
+function listDatabaseRelatedEnvKeys(): array
+{
+    $keys = [];
+
+    foreach (array_merge($_ENV, $_SERVER) as $key => $value) {
+        if (!is_string($key)) {
+            continue;
+        }
+        if (preg_match('/^(MYSQL|DATABASE|RAILWAY)/', $key)) {
+            $keys[] = $key;
+        }
+    }
+
+    sort($keys);
+
+    return array_values(array_unique($keys));
+}
+
+function findUrlFromScannedEnvironment(): ?string
+{
+    $urlKeys = [
+        'DATABASE_URL',
+        'MYSQL_URL',
+        'MYSQL_PUBLIC_URL',
+        'MYSQL_PRIVATE_URL',
+        'DATABASE_PRIVATE_URL',
+    ];
+
+    foreach ($urlKeys as $key) {
+        $value = getRuntimeEnv($key);
+        if ($value !== null) {
+            return $value;
+        }
+    }
+
+    foreach (array_merge($_ENV, $_SERVER) as $key => $value) {
+        if (!is_string($key) || !is_string($value) || $value === '') {
+            continue;
+        }
+        if (preg_match('/(?:^|_)MYSQL_URL$/', $key) || preg_match('/^DATABASE_URL$/', $key)) {
+            return $value;
+        }
+    }
+
+    return null;
 }
 
 function buildDatabaseUrl(): ?string
 {
+    $url = findUrlFromScannedEnvironment();
+    if ($url !== null) {
+        return normalizeDatabaseUrl($url);
+    }
+
     $url = env('DATABASE_URL');
     if ($url) {
         return normalizeDatabaseUrl($url);
     }
 
-    $url = env('MYSQL_URL') ?? env('MYSQL_PUBLIC_URL');
-    if ($url) {
-        return normalizeDatabaseUrl($url);
-    }
-
-    $host = env('MYSQLHOST');
-    $user = env('MYSQLUSER');
-    $password = env('MYSQLPASSWORD');
-    $database = env('MYSQLDATABASE');
-    $port = env('MYSQLPORT', '3306');
+    $host = env('MYSQLHOST') ?? env('MYSQL_HOST');
+    $user = env('MYSQLUSER') ?? env('MYSQL_USER');
+    $password = env('MYSQLPASSWORD') ?? env('MYSQL_PASSWORD') ?? env('MYSQL_ROOT_PASSWORD');
+    $database = env('MYSQLDATABASE') ?? env('MYSQL_DATABASE');
+    $port = env('MYSQLPORT') ?? env('MYSQL_PORT') ?? '3306';
 
     if ($host && $user && $password !== null && $database) {
         return normalizeDatabaseUrl(sprintf(
             'mysql://%s:%s@%s:%s/%s',
             rawurlencode($user),
-            rawurlencode($password),
+            rawurlencode((string) $password),
             $host,
             $port,
             $database
@@ -139,7 +235,7 @@ function normalizeDatabaseUrl(string $url): string
 {
     if (str_contains($url, '@db:') || str_contains($url, '@db/')) {
         fwrite(STDERR, "ERROR: DATABASE_URL uses host \"db\" (docker-compose only).\n");
-        fwrite(STDERR, "On Railway, set DATABASE_URL = \${{MySQL.MYSQL_URL}} on your app service.\n");
+        fwrite(STDERR, "Your local .env is NOT deployed. On Railway use: DATABASE_URL = \${{MySQL.MYSQL_URL}}\n");
         exit(1);
     }
 
@@ -173,10 +269,31 @@ function exportToRuntime(string $name, string $value): void
     $_SERVER[$name] = $value;
 }
 
+function printEnvDiagnostics(): void
+{
+    $keys = listDatabaseRelatedEnvKeys();
+
+    fwrite(STDERR, 'Railway detected: '.(isRailway() ? 'yes' : 'no')."\n");
+    fwrite(STDERR, 'Database-related env vars on this container: '.($keys !== [] ? implode(', ', $keys) : '(none)')."\n");
+
+    if (isRailway() && $keys === []) {
+        fwrite(STDERR, "\n");
+        fwrite(STDERR, "Your APP service has no MySQL variables. The local .env file is NOT copied into Docker.\n");
+        fwrite(STDERR, "Fix in Railway dashboard:\n");
+        fwrite(STDERR, "  1. Open your APP service (Symfony) → Variables tab (not the MySQL service).\n");
+        fwrite(STDERR, "  2. Click + New Variable → Variable Reference → pick MySQL → MYSQL_URL.\n");
+        fwrite(STDERR, "  3. Name the variable: DATABASE_URL\n");
+        fwrite(STDERR, "  4. Add APP_SECRET (random 32+ char string).\n");
+        fwrite(STDERR, "  5. Redeploy the APP service.\n");
+        fwrite(STDERR, "\n");
+        fwrite(STDERR, "Or: APP service → Settings → Connect → select your MySQL service.\n");
+    }
+}
+
 $databaseUrl = buildDatabaseUrl();
 if ($databaseUrl === null) {
     fwrite(STDERR, "ERROR: No database configuration found.\n");
-    fwrite(STDERR, "Set DATABASE_URL or link Railway MySQL (MYSQL_URL / MYSQLHOST variables).\n");
+    printEnvDiagnostics();
     exit(1);
 }
 
@@ -185,8 +302,10 @@ exportToRuntime('DATABASE_URL', $databaseUrl);
 $appEnv = env('APP_ENV', 'prod') ?? 'prod';
 $appSecret = env('APP_SECRET');
 
-if (!$appSecret || $appSecret === 'change_me_in_production') {
-    fwrite(STDERR, "ERROR: Set APP_SECRET in Railway or docker-compose (random string, 32+ chars).\n");
+$weakSecrets = ['change_me_in_production', 'change_me_for_local_dev_only'];
+if (!$appSecret || in_array($appSecret, $weakSecrets, true) || strlen($appSecret) < 16) {
+    fwrite(STDERR, "ERROR: Set APP_SECRET on the Railway APP service (random string, at least 16 chars).\n");
+    printEnvDiagnostics();
     exit(1);
 }
 

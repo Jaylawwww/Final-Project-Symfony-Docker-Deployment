@@ -1,79 +1,104 @@
 # Deploy to Railway (step by step)
 
-Your code is ready. Railway still needs you to create a database and set two variables in the dashboard.
+        ## Important: your local `.env` is NOT used on Railway
 
-## 1. Push your code
+The file `.env` on your computer (with `DATABASE_URL=...@db:3306...`) is **ignored** by Docker/Railway.  
+Only variables you set on the **APP service** in Railway are used.
 
-Commit and push this repository to GitHub (or connect the folder in Railway).
+---
 
-## 2. Create the Railway project
+## 1. Push code to GitHub
 
-1. Go to [https://railway.com](https://railway.com) and sign in.
-2. Click **New Project** → **Deploy from GitHub repo**.
-3. Select this repository.
-4. Railway detects the `Dockerfile` and builds the app service.
+Commit and push this repository.
+
+## 2. Create Railway project
+
+1. [railway.com](https://railway.com) → **New Project** → **Deploy from GitHub repo**
+2. Select this repository
 
 ## 3. Add MySQL
 
-1. In the same project, click **+ New** → **Database** → **MySQL**.
-2. Wait until the MySQL service shows **Active** / healthy.
+1. In the project → **+ New** → **Database** → **MySQL**
+2. Wait until MySQL is **Active**
 
-## 4. Link the database to your app
+## 4. Connect MySQL to your APP (choose one method)
 
-1. Click your **app** service (not MySQL).
-2. Open the **Variables** tab.
-3. Click **+ New Variable** → **Add Variable Reference** (or **Reference**).
-4. Choose your **MySQL** service and select **`MYSQL_URL`**.
-5. Set the variable **name** on the app to: `DATABASE_URL`  
-   (Railway copies the MySQL URL into `DATABASE_URL` for Symfony.)
+### Method A — Connect (easiest)
+
+1. Click your **APP** service (Symfony / Dockerfile), **not** MySQL
+2. Go to **Settings**
+3. Find **Connect** (or **Service connections**)
+4. Connect to your **MySQL** service
+5. Railway injects `MYSQLHOST`, `MYSQL_URL`, etc. onto the app
+
+Then add one variable so Symfony sees the URL:
+
+1. **APP service** → **Variables** → **+ New Variable** → **Reference**
+2. Service: **MySQL** → variable: **`MYSQL_URL`**
+3. Name on app: **`DATABASE_URL`**
+
+### Method B — Manual variables only
+
+On the **APP service** → **Variables**:
+
+| Name | Value |
+|------|--------|
+| `DATABASE_URL` | `${{MySQL.MYSQL_URL}}` |
+| `APP_SECRET` | long random string (32+ chars) |
+| `APP_ENV` | `prod` |
+
+If your MySQL service is not named `MySQL`, change the reference (e.g. `${{mysql.MYSQL_URL}}`).
+
+See `railway.env.example` in this repo.
 
 ## 5. Set APP_SECRET
 
-Still on the app **Variables** tab:
+On the **APP service** → **Variables**:
 
-1. Click **+ New Variable**.
-2. Name: `APP_SECRET`
-3. Value: a long random string (at least 32 characters).  
-   Example generator: `openssl rand -hex 32`
+- `APP_SECRET` = random string (e.g. from `openssl rand -hex 32`)
 
-Optional but recommended:
+## 6. Redeploy the APP service
 
-| Name       | Value   |
-|------------|---------|
-| `APP_ENV`  | `prod`  |
-| `APP_DEBUG`| `0`     |
+**Deployments** → **Redeploy**
 
-## 6. Redeploy
+### Success logs look like:
 
-1. Open the app service → **Deployments**.
-2. Click **Redeploy** (or push a new commit).
-3. Open **Deploy Logs**. You should see:
-   - `Database target: mysql://...@....railway.app:.../railway`
-   - `Database connection: OK`
-   - `Database is ready.`
-
-## 7. Open the site
-
-1. App service → **Settings** → **Networking** → **Generate Domain**.
-2. Open the generated URL in your browser.
-
----
-
-## Common mistakes
-
-| Problem | Fix |
-|---------|-----|
-| `host "db"` error | Do not use `mysql://root:root@db:3306/...`. Use **variable reference** `MYSQL_URL` → `DATABASE_URL`. |
-| `APP_SECRET` error | Add `APP_SECRET` on the **app** service (not only MySQL). |
-| Database timeout | MySQL must be **Active** before redeploying the app. Same Railway **project** for both services. |
-| Build OK, app crashes | Check **Deploy Logs** on the app service, not only build logs. |
-
----
-
-## Local test (before Railway)
-
-```bash
-docker compose up --build
+```text
+Railway detected: yes
+Database-related env vars on this container: DATABASE_URL, MYSQLHOST, ...
+Database target: mysql://root@....railway.internal:3306/railway
+Database connection: OK
+Database is ready.
 ```
 
-Open [http://localhost:8000](http://localhost:8000).
+### If you see `(none)` for env vars:
+
+Variables are on the wrong service or not added. They must be on the **APP** container, not only on MySQL.
+
+### If the site shows "Application failed to respond" (502)
+
+The container is not listening on Railway's `PORT`, or it crashed on startup.
+
+1. Open **APP service** → **Deployments** → latest deploy → **View logs** (runtime, not only build).
+2. You must see:
+   ```text
+   [entrypoint] Starting nginx on 0.0.0.0:XXXX...
+   Database connection: OK
+   ```
+3. If logs stop at `ERROR: No database configuration` → add `DATABASE_URL` (see step 4 above).
+4. If logs stop at `APP_SECRET` → add `APP_SECRET` on the APP service.
+5. Push the latest code (nginx listens on `PORT` + cache permissions fix), then **Redeploy**.
+
+## 7. Public URL
+
+**APP service** → **Settings** → **Networking** → **Generate Domain**
+
+---
+
+## Checklist
+
+- [ ] MySQL service exists and is Active
+- [ ] `DATABASE_URL` is on the **APP** service (reference to `MYSQL_URL`)
+- [ ] `APP_SECRET` is on the **APP** service
+- [ ] Redeployed **APP** after adding variables
+- [ ] Logs show `Database-related env vars: ...` with at least `DATABASE_URL` or `MYSQL_URL`

@@ -14,21 +14,22 @@ COPY .env.docker .env
 
 ENV COMPOSER_ALLOW_SUPERUSER=1 \
     APP_ENV=prod \
-    APP_DEBUG=0
+    APP_DEBUG=0 \
+    PORT=8080
 
 RUN composer install --no-dev --optimize-autoloader --no-interaction --no-scripts
 
 COPY nginx-main.conf /etc/nginx/nginx.conf
+COPY docker/nginx-site.conf.template /etc/nginx/templates/default.conf.template
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-RUN mkdir -p var/cache var/log \
+RUN mkdir -p var/cache var/log /etc/nginx/templates \
     && chown -R www-data:www-data var public
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-# Railway sets PORT at runtime; entrypoint updates nginx to listen on it.
-EXPOSE 80
+EXPOSE 8080
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["web"]

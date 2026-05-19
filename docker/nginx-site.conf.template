@@ -1,0 +1,25 @@
+server {
+    listen 0.0.0.0:__PORT__ default_server;
+    listen [::]:__PORT__ default_server;
+    server_name _;
+
+    root /var/www/public;
+    index index.php;
+
+    location / {
+        try_files $uri /index.php$is_args$args;
+    }
+
+    location ~ \.php$ {
+        fastcgi_pass 127.0.0.1:9000;
+        fastcgi_split_path_info ^(.+\.php)(/.*)$;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_param PATH_INFO $fastcgi_path_info;
+        fastcgi_read_timeout 300;
+    }
+
+    location ~ /\. {
+        deny all;
+    }
+}

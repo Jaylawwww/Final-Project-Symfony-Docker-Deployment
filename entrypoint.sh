@@ -4,58 +4,82 @@ set -e
 cd /var/www
 
 MODE="${1:-web}"
+PORT="${PORT:-8080}"
+export PORT
+
+log() {
+    echo "[entrypoint] $*"
+}
 
 install_dependencies() {
     if [ ! -f vendor/autoload.php ]; then
+        log "Installing Composer dependencies..."
         composer install --no-interaction --no-scripts
     fi
 }
 
 bootstrap_env() {
+    log "Loading environment..."
     php docker/bootstrap-env.php
 }
 
+configure_nginx() {
+    log "Configuring nginx on port ${PORT}..."
+    sed "s/__PORT__/${PORT}/g" /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf
+    nginx -t
+}
+
 wait_for_database() {
-    echo "Waiting for database..."
+    log "Waiting for database..."
     i=0
     while [ "$i" -lt 45 ]; do
         if BOOTSTRAP_CHECK_DB=1 php docker/bootstrap-env.php --check >/dev/null 2>&1; then
-            echo "Database is ready."
+            log "Database is ready."
             return 0
         fi
         i=$((i + 1))
         sleep 2
     done
 
-    echo "ERROR: Database not reachable after 90s."
+    log "ERROR: Database not reachable after 90s."
     BOOTSTRAP_CHECK_DB=1 php docker/bootstrap-env.php --check 2>&1 || true
     exit 1
 }
 
 run_migrations() {
-    php bin/console doctrine:migrations:migrate --no-interaction --no-ansi
+    log "Running migrations..."
+    if php bin/console doctrine:migrations:migrate --no-interaction --no-ansi; then
+        log "Migrations complete."
+    else
+        log "WARNING: Migrations failed (app may still start)."
+    fi
 }
 
 warm_symfony_cache() {
+    log "Warming Symfony cache..."
     php bin/console cache:clear --env="${APP_ENV:-prod}" --no-warmup
     php bin/console cache:warmup --env="${APP_ENV:-prod}"
+    chown -R www-data:www-data var
 }
 
-configure_nginx() {
-    if [ -n "$PORT" ]; then
-        sed -i "s/listen 80;/listen ${PORT};/" /etc/nginx/conf.d/default.conf
-    fi
+start_php_fpm() {
+    log "Starting PHP-FPM..."
+    php-fpm -D
+}
 
-    sed -i 's/app:9000/127.0.0.1:9000/g' /etc/nginx/conf.d/default.conf
+start_nginx() {
+    log "Starting nginx on 0.0.0.0:${PORT}..."
+    exec nginx -g 'daemon off;'
 }
 
 prepare_runtime() {
     install_dependencies
     bootstrap_env
     mkdir -p var/cache var/log
-    chown -R www-data:www-data var 2>/dev/null || true
+    chown -R www-data:www-data var public 2>/dev/null || true
 }
 
+log "Mode: ${MODE}, PORT: ${PORT}"
 prepare_runtime
 
 case "$MODE" in
@@ -69,8 +93,8 @@ case "$MODE" in
         wait_for_database
         run_migrations
         warm_symfony_cache
-        php-fpm -D
-        exec nginx -g 'daemon off;'
+        start_php_fpm
+        start_nginx
         ;;
     *)
         exec "$@"
